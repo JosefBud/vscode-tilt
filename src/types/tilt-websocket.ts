@@ -286,7 +286,7 @@ export const $logList = z.object({
 export const $initialEvent = z.object({
   isComplete: z.boolean(),
   logList: $logList,
-  uiResources: z.array($uiResource),
+  uiResources: z.optional(z.array($uiResource)),
   uiButtons: z.array($uiButton),
 });
 
