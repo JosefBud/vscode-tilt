@@ -302,11 +302,12 @@ export const $updatePayload = z.object({
   }),
 });
 
+const BUILD_REASON_FLAG_TRIGGER_WEB = 16;
 /**
  * The payload shape used when sending a POST request to the Tilt API in order to restart,
  * or "trigger", a resource
  */
 export const $restartPayload = z.object({
   manifest_names: z.tuple([z.string()]), // Only supports an array w/ 1 element
-  build_reason: z.literal(16), // "BuildReasonFlagTriggerWeb" https://github.com/tilt-dev/tilt/blob/04fd1f2c6c5137ba38a2db9b1c8fece21a5162db/pkg/model/build_reason.go#L9-L41
+  build_reason: z.literal(BUILD_REASON_FLAG_TRIGGER_WEB), // "BuildReasonFlagTriggerWeb" https://github.com/tilt-dev/tilt/blob/04fd1f2c6c5137ba38a2db9b1c8fece21a5162db/pkg/model/build_reason.go#L9-L41
 });
