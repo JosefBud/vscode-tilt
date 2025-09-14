@@ -45,6 +45,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "tiltViewServices",
+        "contents": "Unable to connect to your Tilt server.\nMake sure you've configured the extension with your hostname and port."
+      }
+    ],
     "commands": [
       {
         "command": "vscode-tilt.restartResource",

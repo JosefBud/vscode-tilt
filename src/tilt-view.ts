@@ -1,10 +1,8 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import z from 'zod';
+import type { ErrorEvent } from 'undici-types';
 import {
   $initialEvent,
-  $logList,
   $uiResourceMetadata,
   $span,
   $uiResourceStatus,
@@ -13,7 +11,6 @@ import {
   $restartPayload,
   $updatePayload,
 } from './types/tilt-websocket';
-import { spawn } from 'child_process';
 import { addMicrosecondOffsetToIsoDatetime } from './utils';
 
 type Resource = z.infer<typeof $uiResource>;
@@ -65,28 +62,43 @@ type LabeledResources = Map<string, Resources>;
 type Buttons = Map<string, z.infer<typeof $uiButton>>;
 
 const UNLABELED = 'unlabeled' as const;
+const generateDefaultLabeledResources = () => new Map([[UNLABELED, new Map()]]);
 
 export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
+  // region Events
   private _onDidChangeTreeData: vscode.EventEmitter<
     TiltViewItem | undefined | void
   > = new vscode.EventEmitter();
   readonly onDidChangeTreeData: vscode.Event<TiltViewItem | undefined | void> =
     this._onDidChangeTreeData.event;
+  // endregion
 
-  private readonly socket: WebSocket;
+  // region Public
+  /**
+   * Set externally when the view visibility changes.
+   * Primarily used to stop attempting to open server connections if the view isn't active.
+   * This is only for new connections; existing connections will always stay open and
+   * continuously updating state to stay ready.
+   */
+  public isViewVisible: boolean = true;
+  // endregion
+
+  // region Private
+  private socket: WebSocket | undefined;
+  private lastWebSocketError: ErrorEvent | undefined;
   private readonly hostname: string;
   private readonly port: string | number;
   private isInitialized = false;
   private manifests: string[] = [];
   private resources: Resources = new Map();
-  private labeledResources: LabeledResources = new Map([
-    [UNLABELED, new Map()],
-  ]);
+  private labeledResources: LabeledResources =
+    generateDefaultLabeledResources();
   private buttons: Buttons = new Map();
 
   private get labels() {
     return [...this.labeledResources.keys()];
   }
+  // endregion
 
   constructor(private readonly context: vscode.ExtensionContext) {
     console.log('Constructing TiltViewProvider');
@@ -113,48 +125,37 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
       this.toggleDisableStatusResourceCommand,
     );
 
-    // WebSocket connection setup
-    this.socket = new WebSocket(`ws://${this.hostname}:${this.port}/ws/view`);
-    this.socket.addEventListener('error', (...args) => {
-      console.error('error', ...args);
-    });
-    this.socket.addEventListener('message', (event) => {
-      const parsedData = JSON.parse(
-        typeof event.data === 'string' ? event.data : '{}',
-      );
-      // 'isComplete' seems to only show up in the first websocket message, which is also
-      // a full payload of all of the Tilt data, so it can be used to initialize everything.
-      if ('isComplete' in parsedData) {
-        const parsedEvent = $initialEvent.safeParse(parsedData);
-        if (parsedEvent.success) {
-          this.initialize(parsedEvent.data);
-        } else {
-          console.error('Unable to parse initial event', parsedEvent.error);
-        }
-      } else if ('uiResources' in parsedData) {
-        const uiResources = z
-          .array($uiResource)
-          .safeParse(parsedData.uiResources);
-        if (uiResources.success) {
-          this.updateResources(uiResources.data);
-        } else {
-          console.error('Error while parsing uiResources:', uiResources.error);
+    // Interval to check on connection state and re-connect if necessary
+    setInterval(() => {
+      if (this.socket) {
+        if (this.socket.readyState === WebSocket.OPEN) return;
+        if (
+          this.socket.readyState === WebSocket.CONNECTING &&
+          this.lastWebSocketError
+        ) {
+          this.socket.close();
         }
       }
-      if ('uiButtons' in parsedData) {
-        const uiButtons = z.array($uiButton).safeParse(parsedData.uiButtons);
-        if (uiButtons.success) {
-          this.updateButtons(uiButtons.data);
-        } else {
-          console.error('Error while parsing uiButtons:', uiButtons.error);
-        }
-      }
-      this.refresh();
-    });
+      if (!this.isViewVisible) return;
+      this.reset();
+      this.openConnection();
+    }, 1000);
   }
 
   refresh(): void {
     this._onDidChangeTreeData.fire();
+  }
+
+  reset(): void {
+    this.socket = undefined;
+    this.isInitialized = false;
+    this.manifests = [];
+    this.buttons.clear();
+    this.labeledResources = generateDefaultLabeledResources();
+    this.resources.clear();
+    this.lastWebSocketError = undefined;
+
+    this.refresh();
   }
 
   getTreeItem(element: TiltViewItem): vscode.TreeItem {
@@ -193,6 +194,46 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
       default:
         return DEFAULT;
     }
+  }
+
+  openConnection(): void {
+    this.socket = new WebSocket(`ws://${this.hostname}:${this.port}/ws/view`);
+    this.socket.addEventListener('error', (error) => {
+      this.lastWebSocketError = error;
+    });
+    this.socket.addEventListener('message', (event) => {
+      const parsedData = JSON.parse(
+        typeof event.data === 'string' ? event.data : '{}',
+      );
+      // 'isComplete' seems to only show up in the first websocket message, which is also
+      // a full payload of all of the Tilt data, so it can be used to initialize everything.
+      if ('isComplete' in parsedData) {
+        const parsedEvent = $initialEvent.safeParse(parsedData);
+        if (parsedEvent.success) {
+          this.initialize(parsedEvent.data);
+        } else {
+          console.error('Unable to parse initial event', parsedEvent.error);
+        }
+      } else if ('uiResources' in parsedData) {
+        const uiResources = z
+          .array($uiResource)
+          .safeParse(parsedData.uiResources);
+        if (uiResources.success) {
+          this.updateResources(uiResources.data);
+        } else {
+          console.error('Error while parsing uiResources:', uiResources.error);
+        }
+      }
+      if ('uiButtons' in parsedData) {
+        const uiButtons = z.array($uiButton).safeParse(parsedData.uiButtons);
+        if (uiButtons.success) {
+          this.updateButtons(uiButtons.data);
+        } else {
+          console.error('Error while parsing uiButtons:', uiButtons.error);
+        }
+      }
+      this.refresh();
+    });
   }
 
   async restartResourceCommand(resourceView: TiltViewItem): Promise<void> {
@@ -327,7 +368,9 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
       },
       [] as string[],
     );
-    this.updateResources(initialEvent.uiResources);
+    if (initialEvent.uiResources) {
+      this.updateResources(initialEvent.uiResources);
+    }
     this.updateButtons([...initialEvent.uiButtons]);
     this.isInitialized = true;
   }
