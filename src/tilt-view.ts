@@ -90,10 +90,10 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
   private readonly port: string | number;
   private isInitialized = false;
   private manifests: string[] = [];
-  private resources: Resources = new Map();
+  private readonly resources: Resources = new Map();
   private labeledResources: LabeledResources =
     generateDefaultLabeledResources();
-  private buttons: Buttons = new Map();
+  private readonly buttons: Buttons = new Map();
 
   private get labels() {
     return [...this.labeledResources.keys()];
@@ -126,7 +126,7 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
     );
 
     // Interval to check on connection state and re-connect if necessary
-    setInterval(() => {
+    const interval = setInterval(() => {
       if (this.socket) {
         if (this.socket.readyState === WebSocket.OPEN) return;
         if (
@@ -140,6 +140,9 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
       this.reset();
       this.openConnection();
     }, 1000);
+    this.context.subscriptions.push(
+      new vscode.Disposable(() => clearInterval(interval)),
+    );
   }
 
   refresh(): void {
@@ -147,6 +150,9 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
   }
 
   reset(): void {
+    try {
+      this.socket?.close?.();
+    } catch {}
     this.socket = undefined;
     this.isInitialized = false;
     this.manifests = [];
@@ -197,6 +203,8 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
   }
 
   openConnection(): void {
+    // The socket property should be undefined via this.reset() before creating a new one
+    if (this.socket) return;
     this.socket = new WebSocket(`ws://${this.hostname}:${this.port}/ws/view`);
     this.socket.addEventListener('error', (error) => {
       this.lastWebSocketError = error;

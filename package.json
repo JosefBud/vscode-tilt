@@ -126,7 +126,8 @@
     "eslint-plugin-prettier": "^5.5.4",
     "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "undici-types": "^7.16.0"
   },
   "dependencies": {
     "zod": "^4.0.17"
