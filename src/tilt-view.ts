@@ -429,13 +429,14 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
       }
     }
 
+    const globalAnsiRegex = new RegExp(REGEX_ANSI_CODE, 'g');
     for (const log of logList.segments) {
       let prefix = '';
       if (log.spanId && this.spans.has(log.spanId)) {
         prefix = `[${this.spans.get(log.spanId)!.manifestName}] `;
       }
       this.outputChannel.append(
-        prefix + log.text.replaceAll(new RegExp(REGEX_ANSI_CODE, 'g'), ''),
+        prefix + log.text.replaceAll(globalAnsiRegex, ''),
       );
     }
   }
