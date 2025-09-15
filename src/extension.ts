@@ -4,7 +4,11 @@ import { TiltViewProvider } from './tilt-view';
 export function activate(context: vscode.ExtensionContext) {
   console.log('vscode-tilt activated');
 
-  const tiltViewProvider = new TiltViewProvider(context);
+  const outputChannel = vscode.window.createOutputChannel(
+    'Tilt Resource Manager',
+    'plaintext',
+  );
+  const tiltViewProvider = new TiltViewProvider(context, outputChannel);
   const view = vscode.window.createTreeView('tiltViewServices', {
     treeDataProvider: tiltViewProvider,
   });

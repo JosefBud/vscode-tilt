@@ -276,11 +276,29 @@ export const $uiButton = z.object({
   spec: $uiButtonSpec,
 });
 
+export const $logLevel = z.enum({ Info: 'INFO', Warn: 'WARN', Error: 'ERROR' });
 export const $span = z.object({
   manifestName: z.optional(z.string()),
 });
+export const $spans = z.record(z.string(), $span);
+export const $logSegment = z.object({
+  spanId: z.optional(z.string()),
+  level: $logLevel,
+  text: z.string(),
+  time: z.iso.datetime(),
+  /**
+   * Not confident on the schema for this property, so it's commented out until I want to
+   * use it for something.
+   */
+  // fields: z.optional(
+  //   z.object({
+  //     buildEvent: z.literal('init'),
+  //   }),
+  // ),
+});
 export const $logList = z.object({
-  spans: z.record(z.string(), $span),
+  segments: z.array($logSegment),
+  spans: $spans,
 });
 
 export const $initialEvent = z.object({

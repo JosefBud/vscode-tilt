@@ -10,12 +10,16 @@ import {
   $uiButton,
   $restartPayload,
   $updatePayload,
+  $logList,
 } from './types/tilt-websocket';
 import { addMicrosecondOffsetToIsoDatetime } from './utils';
 
 type Resource = z.infer<typeof $uiResource>;
 type Button = z.infer<typeof $uiButton>;
 type InitialEvent = z.infer<typeof $initialEvent>;
+type Span = z.infer<typeof $span>;
+type Spans = Map<string, Span>;
+type LogList = z.infer<typeof $logList>;
 
 const ItemType = z.enum(['label', 'resourceEnabled', 'resourceDisabled']);
 type ItemType = z.infer<typeof ItemType>;
@@ -61,6 +65,10 @@ type LabeledResources = Map<string, Resources>;
  */
 type Buttons = Map<string, z.infer<typeof $uiButton>>;
 
+// e.g. "extension-output-JosefBud.vscode-tilt-#1-Tilt Resource Manager"
+const REGEX_OUTPUT_CHANNEL_FILE_NAME =
+  /extension-output-JosefBud\.vscode-tilt(.*)-Tilt Resource Manager/;
+const REGEX_ANSI_CODE = /[\u001b]\[[0-9]{1,3}[JKHm]/;
 const UNLABELED = 'unlabeled' as const;
 const generateDefaultLabeledResources = () => new Map([[UNLABELED, new Map()]]);
 
@@ -89,7 +97,7 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
   private readonly hostname: string;
   private readonly port: string | number;
   private isInitialized = false;
-  private manifests: string[] = [];
+  private spans: Spans = new Map();
   private readonly resources: Resources = new Map();
   private labeledResources: LabeledResources =
     generateDefaultLabeledResources();
@@ -100,7 +108,10 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
   }
   // endregion
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly outputChannel: vscode.OutputChannel,
+  ) {
     console.log('Constructing TiltViewProvider');
 
     // Config value setup
@@ -155,7 +166,7 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
     } catch {}
     this.socket = undefined;
     this.isInitialized = false;
-    this.manifests = [];
+    this.spans.clear();
     this.buttons.clear();
     this.labeledResources = generateDefaultLabeledResources();
     this.resources.clear();
@@ -230,6 +241,13 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
           this.updateResources(uiResources.data);
         } else {
           console.error('Error while parsing uiResources:', uiResources.error);
+        }
+      } else if ('logList' in parsedData) {
+        const newLogs = $logList.safeParse(parsedData.logList);
+        if (newLogs.success) {
+          this.updateLogOutput(newLogs.data);
+        } else {
+          console.error('Error while parsing new logs:', newLogs.error);
         }
       }
       if ('uiButtons' in parsedData) {
@@ -366,16 +384,8 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
   // When Tilt starts, the initial message is missing a lot of spans/manifests. Need to
   // test this and adjust.
   private initialize(initialEvent: InitialEvent): void {
-    this.manifests = Object.values(initialEvent.logList.spans).reduce<string[]>(
-      (acc, curr) => {
-        const parsed = $span.safeParse(curr).data;
-        if (parsed && parsed.manifestName) {
-          return [...acc, parsed.manifestName];
-        }
-        return acc;
-      },
-      [] as string[],
-    );
+    this.spans = new Map(Object.entries(initialEvent.logList.spans));
+    this.updateLogOutput(initialEvent.logList);
     if (initialEvent.uiResources) {
       this.updateResources(initialEvent.uiResources);
     }
@@ -409,6 +419,24 @@ export class TiltViewProvider implements vscode.TreeDataProvider<TiltViewItem> {
   private updateButtons(buttons: readonly Button[]) {
     for (const button of buttons) {
       this.buttons.set(button.metadata.name, button);
+    }
+  }
+
+  private updateLogOutput(logList: LogList) {
+    for (const [spanId, span] of Object.entries(logList.spans ?? {})) {
+      if (!this.spans.has(spanId) && span.manifestName) {
+        this.spans.set(spanId, span);
+      }
+    }
+
+    for (const log of logList.segments) {
+      let prefix = '';
+      if (log.spanId && this.spans.has(log.spanId)) {
+        prefix = `[${this.spans.get(log.spanId)!.manifestName}] `;
+      }
+      this.outputChannel.append(
+        prefix + log.text.replaceAll(new RegExp(REGEX_ANSI_CODE, 'g'), ''),
+      );
     }
   }
 
