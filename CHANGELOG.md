@@ -6,6 +6,8 @@ All notable changes to the "vscode-tilt" extension will be documented in this fi
 
 ## [Unreleased]
 
+## [0.0.4] - 2025-09-15
+
 ### Added
 
 - Tilt's log stream to extension's Output channel
